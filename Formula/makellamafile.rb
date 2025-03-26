@@ -2,7 +2,7 @@ class Makellamafile < Formula
   desc "Converter for turning LLM files into self-contained executables on macOS"
   homepage "https://github.com/sebk4c/homebrew-makellamafile"
   url "https://github.com/Mozilla-Ocho/llamafile/archive/refs/tags/0.9.1.tar.gz"
-  sha256 "0ad51a6f48e9f711c6f00f4113ba14dbbac3cd4ef82a2fb7d9a01aa17e3a90de"
+  sha256 "9f96f8d214ff3e4ae3743688bc32372939122842216b6047308137a5e66ebe9d"
   license "MIT"
   
   depends_on "curl"
