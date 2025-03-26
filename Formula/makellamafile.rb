@@ -15,9 +15,24 @@ class Makellamafile < Formula
     mkdir_p "#{share_path}/bin"
     mkdir_p "#{share_path}/models"
     
-    # Build llamafile and zipalign from source
-    system "make", "-C", ".", "o/llamafile"
-    system "make", "-C", ".", "o/zipalign"
+    # Download and properly set up cosmocc (required for building llamafile)
+    system "curl", "-L", "-o", "cosmocc.zip", "https://cosmo.zip/pub/cosmocc/cosmocc.zip"
+    system "unzip", "-q", "cosmocc.zip", "-d", "."
+    
+    # Ensure .cosmocc has the right structure (bin directly under .cosmocc without version subdirectories)
+    if Dir.exist?(".cosmocc") && !Dir.exist?(".cosmocc/bin") && Dir.glob(".cosmocc/*/bin").any?
+      # Find the version directory
+      version_dir = Dir.glob(".cosmocc/*/bin").first.split("/")[-2]
+      # Move contents up to create .cosmocc/bin
+      system "cp", "-R", ".cosmocc/#{version_dir}/.", ".cosmocc/"
+    end
+    
+    # Set PATH to use cosmocc's binaries for building
+    ENV["PATH"] = "#{Dir.pwd}/.cosmocc/bin:#{ENV["PATH"]}"
+    
+    # Build llamafile and zipalign using cosmocc
+    system ".cosmocc/bin/make", "o/llamafile"
+    system ".cosmocc/bin/make", "o/zipalign"
     
     # Install the binaries to our share directory
     cp "o/llamafile", "#{share_path}/bin/llamafile"
