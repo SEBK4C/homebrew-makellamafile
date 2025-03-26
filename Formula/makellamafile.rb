@@ -15,28 +15,55 @@ class Makellamafile < Formula
     mkdir_p "#{share_path}/bin"
     mkdir_p "#{share_path}/models"
     
-    # Download and properly set up cosmocc (required for building llamafile)
-    system "curl", "-L", "-o", "cosmocc.zip", "https://cosmo.zip/pub/cosmocc/cosmocc.zip"
-    system "unzip", "-v", "cosmocc.zip", "-d", "."
+    ohai "Setting up cosmocc compiler environment"
+    # Download and set up cosmocc explicitly with better error handling
+    ENV["TMPDIR"] = buildpath/"tmp"
+    mkdir_p ENV["TMPDIR"]
     
-    # Ensure .cosmocc has the right structure (bin directly under .cosmocc without version subdirectories)
-    if Dir.exist?(".cosmocc") && !Dir.exist?(".cosmocc/bin") && Dir.glob(".cosmocc/*/bin").any?
-      # Find the version directory
-      version_dir = Dir.glob(".cosmocc/*/bin").first.split("/")[-2]
-      # Move contents up to create .cosmocc/bin
-      system "cp", "-R", ".cosmocc/#{version_dir}/.", ".cosmocc/"
+    # Download cosmocc zip file
+    cosmocc_zip = buildpath/"cosmocc.zip"
+    system "curl", "-L", "-o", cosmocc_zip, "https://cosmo.zip/pub/cosmocc/cosmocc.zip"
+    
+    unless File.exist?(cosmocc_zip)
+      odie "Failed to download cosmocc.zip"
     end
     
-    # Set PATH to use cosmocc's binaries for building
-    ENV["PATH"] = "#{Dir.pwd}/.cosmocc/bin:#{ENV["PATH"]}"
+    # Extract cosmocc
+    system "unzip", cosmocc_zip, "-d", buildpath
     
-    # Build llamafile and zipalign using cosmocc
-    system ".cosmocc/bin/make", "o/llamafile"
-    system ".cosmocc/bin/make", "o/zipalign"
+    unless Dir.exist?(buildpath/".cosmocc")
+      odie "Failed to extract cosmocc.zip or .cosmocc directory not found"
+    end
     
-    # Install the binaries to our share directory
-    cp "o/llamafile", "#{share_path}/bin/llamafile"
-    cp "o/zipalign", "#{share_path}/bin/zipalign"
+    # Set up environment for cosmocc
+    ENV.prepend_path "PATH", buildpath/".cosmocc/bin"
+    cosmocc_make = buildpath/".cosmocc/bin/make"
+    
+    unless File.executable?(cosmocc_make)
+      odie "cosmocc make executable not found or not executable"
+    end
+    
+    ohai "Building llamafile and zipalign (this may take a few minutes)"
+    # Build the tools with detailed output
+    system "ls", "-la", buildpath/".cosmocc/bin/"
+    
+    # Try building with verbose output to see potential errors
+    system cosmocc_make, "-j#{ENV.make_jobs}", "V=1", "o/llamafile", "o/zipalign"
+    
+    unless File.exist?(buildpath/"o/llamafile") && File.exist?(buildpath/"o/zipalign")
+      # If build fails, try alternative approach: download pre-built binaries
+      ohai "Build from source failed, downloading pre-built binaries instead"
+      system "curl", "-L", "-o", "#{share_path}/bin/llamafile", 
+             "https://github.com/Mozilla-Ocho/llamafile/releases/download/0.9.1/llamafile-0.9.1-apple-darwin-arm64"
+      system "curl", "-L", "-o", "#{share_path}/bin/zipalign", 
+             "https://github.com/Mozilla-Ocho/llamafile/releases/download/0.9.1/zipalign-0.9.1-apple-darwin-arm64"
+    else
+      # Install the successfully built binaries
+      cp buildpath/"o/llamafile", "#{share_path}/bin/llamafile"
+      cp buildpath/"o/zipalign", "#{share_path}/bin/zipalign"
+    end
+    
+    # Ensure binaries are executable
     chmod 0755, "#{share_path}/bin/llamafile"
     chmod 0755, "#{share_path}/bin/zipalign"
     
@@ -89,6 +116,7 @@ class Makellamafile < Formula
     chmod 0755, "#{share_path}/bin/create_llamafile.sh"
     
     # Download a tiny test model
+    ohai "Downloading test model"
     system "curl", "-L", "-o", "#{share_path}/models/TinyLLama-v0.1-5M-F16.gguf", 
            "https://huggingface.co/ggml-org/models/resolve/main/TinyLLama-v0.1-5M-F16.gguf"
     
@@ -97,8 +125,29 @@ class Makellamafile < Formula
     bin.install_symlink "#{share_path}/bin/zipalign"
     bin.install_symlink "#{share_path}/bin/create_llamafile.sh" => "makellamafile"
     
-    # Install documentation
-    doc.install Dir["*.md"]
+    # Create a simple README if needed
+    unless File.exist?("README.md")
+      File.write("#{share_path}/README.md", <<~EOS)
+        # MakeLlamafile
+        
+        A macOS-optimized converter for turning GGUF model files into self-contained executables.
+        
+        ## Usage
+        
+        ```bash
+        makellamafile path/to/model.gguf
+        ```
+        
+        For more information, run:
+        ```bash
+        makellamafile --help
+        ```
+      EOS
+      doc.install "#{share_path}/README.md"
+    else
+      doc.install "README.md"
+    end
+    
     if File.exist?("LICENSE")
       doc.install "LICENSE"
     end
