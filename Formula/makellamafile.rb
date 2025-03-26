@@ -17,7 +17,7 @@ class Makellamafile < Formula
     
     # Download and properly set up cosmocc (required for building llamafile)
     system "curl", "-L", "-o", "cosmocc.zip", "https://cosmo.zip/pub/cosmocc/cosmocc.zip"
-    system "unzip", "-q", "cosmocc.zip", "-d", "."
+    system "unzip", "-v", "cosmocc.zip", "-d", "."
     
     # Ensure .cosmocc has the right structure (bin directly under .cosmocc without version subdirectories)
     if Dir.exist?(".cosmocc") && !Dir.exist?(".cosmocc/bin") && Dir.glob(".cosmocc/*/bin").any?
@@ -97,29 +97,8 @@ class Makellamafile < Formula
     bin.install_symlink "#{share_path}/bin/zipalign"
     bin.install_symlink "#{share_path}/bin/create_llamafile.sh" => "makellamafile"
     
-    # Create a simple README if needed
-    unless File.exist?("README.md")
-      File.write("#{share_path}/README.md", <<~EOS)
-        # MakeLlamafile
-        
-        A macOS-optimized converter for turning GGUF model files into self-contained executables.
-        
-        ## Usage
-        
-        ```bash
-        makellamafile path/to/model.gguf
-        ```
-        
-        For more information, run:
-        ```bash
-        makellamafile --help
-        ```
-      EOS
-      doc.install "#{share_path}/README.md"
-    else
-      doc.install "README.md"
-    end
-    
+    # Install documentation
+    doc.install Dir["*.md"]
     if File.exist?("LICENSE")
       doc.install "LICENSE"
     end
