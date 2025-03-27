@@ -274,30 +274,17 @@ CONFIG_CONTENT
   end
   
   def post_install
-    # We don't try to create directories in the user's home anymore
-    # Instead, provide clear instructions in the caveats
-    ohai "Installation complete. Use 'makellamafile --setup' to set up directories."
+    ohai "Installation complete. Run 'makellamafile --setup' to set up directories."
   end
   
   def caveats
-    user_home = ENV["HOME"]
-    
     <<~EOS
       MakeLlamafile has been installed!
       
-      IMPORTANT: First-time setup required
-      ------------------------------------
-      Before using makellamafile, run the setup command:
-      
+      Before using makellamafile, run:
         makellamafile --setup
       
-      This will create the necessary directories:
-        #{user_home}/models/llamafiles      (for converted models)
-        #{user_home}/models/huggingface     (for downloaded models)
-      
-      Usage:
-        makellamafile path/to/model.gguf    (convert a model)
-        makellamafile --help                (show all options)
+      This will create the necessary directories and configuration file.
       
       Note: This version is optimized for macOS on Apple Silicon (M1/M2/M3).
     EOS
