@@ -95,8 +95,9 @@ class Makellamafile < Formula
       set -e
       
       # Default output directory
-      DEFAULT_OUTPUT_DIR="$HOME/Library/Application Support/makellamafile/llamafiles"
-      CONFIG_FILE="$HOME/.config/makellamafile/config"
+      DEFAULT_OUTPUT_DIR="$HOME/models/llamafiles"
+      MODELS_DIR="$HOME/models"
+      CONFIG_FILE="$MODELS_DIR/MakeLlamafileConfig.txt"
       
       # Read from config file if it exists
       if [ -f "$CONFIG_FILE" ]; then
@@ -105,6 +106,47 @@ class Makellamafile < Formula
       
       # Use OUTPUT_DIR from config or default
       OUTPUT_DIR="\${OUTPUT_DIR:-\$DEFAULT_OUTPUT_DIR}"
+      
+      # Function to set up directories and config
+      setup_directories() {
+        echo "Setting up MakeLlamafile directories..."
+        
+        # Create main directories
+        mkdir -p "$MODELS_DIR"
+        mkdir -p "$MODELS_DIR/llamafiles"
+        mkdir -p "$MODELS_DIR/huggingface"
+        
+        # Create config file with instructions if it doesn't exist
+        if [ ! -f "$CONFIG_FILE" ]; then
+          cat > "$CONFIG_FILE" << CONFIG_CONTENT
+# MakeLlamafile Configuration File
+# --------------------------------
+# This file controls the default settings for the MakeLlamafile tool.
+# You can edit this file to customize how your models are converted.
+
+# Directory where converted llamafiles will be stored
+OUTPUT_DIR="$MODELS_DIR/llamafiles"
+
+# Directory where downloaded models will be stored
+DOWNLOAD_DIR="$MODELS_DIR/huggingface"
+
+# Default llamafile parameters (applied to all conversions)
+# Examples:
+# LLAMAFILE_ARGS="--chat-template chatml --chat --n-gpu-layers 35"
+# LLAMAFILE_ARGS="--threads 4 --ctx-size 4096"
+LLAMAFILE_ARGS=""
+
+CONFIG_CONTENT
+          echo "Created configuration file at: $CONFIG_FILE"
+        fi
+        
+        echo "Setup complete! Your models will be stored in:"
+        echo "  - Downloaded models: $MODELS_DIR/huggingface"
+        echo "  - Converted llamafiles: $MODELS_DIR/llamafiles"
+        echo ""
+        echo "You can customize settings in: $CONFIG_FILE"
+        exit 0
+      }
       
       # Parse command line arguments
       POSITIONAL_ARGS=()
@@ -117,12 +159,16 @@ class Makellamafile < Formula
             echo
             echo "Options:"
             echo "  -h, --help                 Show this help message"
+            echo "  --setup                    Set up directories and configuration"
             echo "  -o, --output-dir DIR       Set output directory (default: $OUTPUT_DIR)"
             echo "  -n, --name MODEL_NAME      Custom name for model (default: derived from filename)"
             echo "  -d, --description DESC     Custom description for the model"
             echo "  -t, --test                 Test the generated llamafile after creation"
             echo "  -p, --prompt PROMPT        Test prompt to use with the model"
             exit 0
+            ;;
+          --setup)
+            setup_directories
             ;;
           -o|--output-dir)
             OUTPUT_DIR="$2"
@@ -147,6 +193,17 @@ class Makellamafile < Formula
       if [ $# -lt 1 ]; then
         echo "Error: No input file specified"
         echo "Run with --help for usage information"
+        echo ""
+        echo "Need to set up directories first? Run:"
+        echo "  makellamafile --setup"
+        exit 1
+      fi
+      
+      # Check if output directory exists, suggest setup if not
+      if [ ! -d "$OUTPUT_DIR" ]; then
+        echo "Error: Output directory $OUTPUT_DIR does not exist"
+        echo "Please run setup first:"
+        echo "  makellamafile --setup"
         exit 1
       fi
       
@@ -160,8 +217,8 @@ class Makellamafile < Formula
       mkdir -p "$OUTPUT_DIR/$MODEL_NAME"
       if [ $? -ne 0 ]; then
         echo "Error: Could not create directory $OUTPUT_DIR/$MODEL_NAME"
-        echo "You may need to manually create it:"
-        echo "  mkdir -p \"$OUTPUT_DIR/$MODEL_NAME\""
+        echo "Please run setup first:"
+        echo "  makellamafile --setup"
         exit 1
       fi
       
@@ -217,78 +274,30 @@ class Makellamafile < Formula
   end
   
   def post_install
-    # Use macOS-appropriate directories
-    user_home = ENV["HOME"]
-    library_dir = "#{user_home}/Library/Application Support/makellamafile"
-    config_dir = "#{user_home}/.config/makellamafile"
-    
-    # Use a more permission-friendly approach to directory creation
-    ohai "Setting up user directories..."
-    
-    begin
-      # Try to create directories safely
-      [
-        "#{library_dir}",
-        "#{library_dir}/models",
-        "#{library_dir}/llamafiles",
-        "#{config_dir}"
-      ].each do |dir|
-        if Dir.exist?(dir)
-          ohai "Directory already exists: #{dir}"
-        else
-          Dir.mkdir(dir) rescue nil
-          unless Dir.exist?(dir)
-            opoo "Could not create directory: #{dir}"
-          end
-        end
-      end
-      
-      # Create configuration file if possible
-      if Dir.exist?(config_dir)
-        config_path = "#{config_dir}/config"
-        File.write(config_path, <<~EOS) rescue nil
-          # MakeLlamafile configuration
-          OUTPUT_DIR="#{library_dir}/llamafiles"
-          DOWNLOAD_DIR="#{library_dir}/models"
-          BIN_DIR="#{prefix}/share/makellamafile/bin"
-        EOS
-        
-        if File.exist?(config_path)
-          system "chmod", "644", config_path
-        end
-      end
-      
-      # Attempt to convert the test model if possible
-      test_model = "#{prefix}/share/makellamafile/models/TinyLLama-v0.1-5M-F16.gguf"
-      if File.exist?(test_model) && Dir.exist?("#{library_dir}/llamafiles")
-        system "#{bin}/makellamafile", "-o", "#{library_dir}/llamafiles", "-n", "TinyLLama-v0.1-5M-F16", test_model
-      end
-      
-    rescue => e
-      opoo "Error during setup: #{e.message}"
-    end
+    # We don't try to create directories in the user's home anymore
+    # Instead, provide clear instructions in the caveats
+    ohai "Installation complete. Use 'makellamafile --setup' to set up directories."
   end
   
   def caveats
     user_home = ENV["HOME"]
-    library_dir = "#{user_home}/Library/Application Support/makellamafile"
     
     <<~EOS
       MakeLlamafile has been installed!
       
-      To convert a model file to a llamafile:
-        makellamafile path/to/model.gguf
+      IMPORTANT: First-time setup required
+      ------------------------------------
+      Before using makellamafile, run the setup command:
       
-      If you get permission errors when running the tool, you may need to manually create:
-        mkdir -p "#{library_dir}/models"
-        mkdir -p "#{library_dir}/llamafiles"
-        mkdir -p "#{user_home}/.config/makellamafile"
+        makellamafile --setup
       
-      The default output location for llamafiles is:
-        #{library_dir}/llamafiles
+      This will create the necessary directories:
+        #{user_home}/models/llamafiles      (for converted models)
+        #{user_home}/models/huggingface     (for downloaded models)
       
-      For more information, run:
-        makellamafile --help
+      Usage:
+        makellamafile path/to/model.gguf    (convert a model)
+        makellamafile --help                (show all options)
       
       Note: This version is optimized for macOS on Apple Silicon (M1/M2/M3).
     EOS
@@ -297,6 +306,9 @@ class Makellamafile < Formula
   test do
     # Basic check that the executable runs
     assert_match "Usage:", shell_output("#{bin}/makellamafile --help")
+    
+    # Check if the --setup command works (but don't actually run it since test env can't create dirs)
+    assert_match "setup", shell_output("#{bin}/makellamafile --help")
     
     # Check if binaries are available
     assert_predicate bin/"llamafile", :executable?
