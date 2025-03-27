@@ -47,14 +47,7 @@ class Makellamafile < Formula
       else
         # Skip building and just download pre-built binaries
         ohai "Unable to set up cosmocc properly, downloading pre-built binaries instead"
-        system "curl", "-L", "-o", "#{share_path}/bin/llamafile", 
-               "https://github.com/Mozilla-Ocho/llamafile/releases/download/0.9.1/llamafile-0.9.1-apple-darwin-arm64"
-        system "curl", "-L", "-o", "#{share_path}/bin/zipalign", 
-               "https://github.com/Mozilla-Ocho/llamafile/releases/download/0.9.1/zipalign-0.9.1-apple-darwin-arm64"
-        
-        # Ensure binaries are executable and continue with script creation
-        chmod 0755, "#{share_path}/bin/llamafile"
-        chmod 0755, "#{share_path}/bin/zipalign"
+        download_binaries(share_path)
         goto :create_script
       end
     end
@@ -72,10 +65,7 @@ class Makellamafile < Formula
     unless File.exist?(buildpath/"o/llamafile") && File.exist?(buildpath/"o/zipalign")
       # If build fails, try alternative approach: download pre-built binaries
       ohai "Build from source failed, downloading pre-built binaries instead"
-      system "curl", "-L", "-o", "#{share_path}/bin/llamafile", 
-             "https://github.com/Mozilla-Ocho/llamafile/releases/download/0.9.1/llamafile-0.9.1-apple-darwin-arm64"
-      system "curl", "-L", "-o", "#{share_path}/bin/zipalign", 
-             "https://github.com/Mozilla-Ocho/llamafile/releases/download/0.9.1/zipalign-0.9.1-apple-darwin-arm64"
+      download_binaries(share_path)
     else
       # Install the successfully built binaries
       cp buildpath/"o/llamafile", "#{share_path}/bin/llamafile"
@@ -171,9 +161,16 @@ CONFIG_CONTENT
           output_file="$DOWNLOAD_DIR/$(basename "$output_file")"
         fi
         
-        curl -L -o "$output_file" "$url"
+        # Actually download the file
+        curl -L --output "$output_file" "$url"
         
-        echo "Download complete!"
+        # Check if download was successful
+        if [ ! -f "$output_file" ]; then
+          echo "Error: Download failed"
+          exit 1
+        fi
+        
+        echo "Download complete: $output_file"
         echo "$output_file"
       }
       
@@ -308,11 +305,23 @@ EOF
         
         echo "Creating llamafile $output_file from $input_file..."
         
+        # Make sure the input file exists
+        if [ ! -f "$input_file" ]; then
+          echo "Error: Input file not found: $input_file"
+          exit 1
+        fi
+        
         # Create output directory
         mkdir -p "$(dirname "$output_file")"
         
         # Copy the llamafile executable
         cp "$LLAMAFILE" "$output_file"
+        
+        # Check if the copy was successful
+        if [ ! -f "$output_file" ]; then
+          echo "Error: Failed to create llamafile at $output_file"
+          exit 1
+        fi
         
         # Create .args file with default arguments
         echo "Creating arguments file..."
@@ -458,9 +467,15 @@ EOF
         exit 1
       fi
       
-      # Check if binaries exist
-      if [ ! -x "$LLAMAFILE" ] || [ ! -x "$ZIPALIGN" ]; then
-        echo "Error: Required binaries not found or not executable"
+      # Check if binaries exist and are executable
+      if [ ! -f "$LLAMAFILE" ] || [ ! -x "$LLAMAFILE" ]; then
+        echo "Error: llamafile binary not found or not executable at $LLAMAFILE"
+        echo "Please ensure MakeLlamafile is properly installed"
+        exit 1
+      fi
+      
+      if [ ! -f "$ZIPALIGN" ] || [ ! -x "$ZIPALIGN" ]; then
+        echo "Error: zipalign binary not found or not executable at $ZIPALIGN"
         echo "Please ensure MakeLlamafile is properly installed"
         exit 1
       fi
@@ -559,6 +574,43 @@ EOF
     
     if File.exist?("LICENSE")
       doc.install "LICENSE"
+    end
+  end
+  
+  # Helper method to download binary files with validation
+  def download_binaries(share_path)
+    version = "0.9.1"
+    binaries = {
+      "llamafile" => "llamafile-#{version}-apple-darwin-arm64",
+      "zipalign" => "zipalign-#{version}-apple-darwin-arm64"
+    }
+    
+    ohai "Downloading pre-built binaries (version #{version})"
+    
+    binaries.each do |binary_name, file_name|
+      binary_path = "#{share_path}/bin/#{binary_name}"
+      
+      # Download binary with explicit output and show progress
+      url = "https://github.com/Mozilla-Ocho/llamafile/releases/download/#{version}/#{file_name}"
+      system "curl", "-#", "-L", "-o", binary_path, url
+      
+      # Verify file was downloaded and has content
+      unless File.exist?(binary_path) && File.size(binary_path) > 1000
+        odie "Failed to download #{binary_name} from #{url}"
+      end
+      
+      # Set executable permission
+      chmod 0755, binary_path
+      
+      # Basic verification that it's a binary file
+      if system "file", binary_path, :out => File::NULL, :err => File::NULL
+        output = `file #{binary_path}`
+        if output.include?("text") || output.include?("Not Found")
+          odie "Downloaded #{binary_name} is not a valid binary file"
+        end
+      end
+      
+      ohai "Successfully downloaded #{binary_name}"
     end
   end
   

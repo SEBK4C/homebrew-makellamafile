@@ -166,6 +166,15 @@ When installed via Homebrew, the files are organized as follows:
 
 On Intel Macs, Homebrew typically installs to `/usr/local/` instead of `/opt/homebrew/`.
 
+## Development Notes
+
+MakeLlamafile has been designed with robustness and maintainability in mind:
+
+- The installation process includes validation checks to ensure all binaries are correctly downloaded
+- Binary verification prevents corrupted files from being installed
+- Version tracking is centralized, making it easy to update to new versions of llamafile
+- When you need to update to a new version of llamafile, you'll only need to change the version number in one place
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
