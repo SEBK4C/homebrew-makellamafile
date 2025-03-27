@@ -89,7 +89,7 @@ class Makellamafile < Formula
     # Create script label for goto
     create_script = true
     
-    # Create a basic version of create_llamafile.sh script
+    # Create an enhanced version of create_llamafile.sh script
     File.write("#{share_path}/bin/create_llamafile.sh", <<~EOS)
       #!/bin/bash
       set -e
@@ -99,6 +99,11 @@ class Makellamafile < Formula
       MODELS_DIR="$HOME/models"
       CONFIG_FILE="$MODELS_DIR/MakeLlamafileConfig.txt"
       
+      # Set Homebrew binary paths
+      BIN_DIR="#{share_path}/bin"
+      LLAMAFILE="$BIN_DIR/llamafile"
+      ZIPALIGN="$BIN_DIR/zipalign"
+      
       # Read from config file if it exists
       if [ -f "$CONFIG_FILE" ]; then
         source "$CONFIG_FILE"
@@ -106,6 +111,7 @@ class Makellamafile < Formula
       
       # Use OUTPUT_DIR from config or default
       OUTPUT_DIR="\${OUTPUT_DIR:-\$DEFAULT_OUTPUT_DIR}"
+      DOWNLOAD_DIR="\${DOWNLOAD_DIR:-\$MODELS_DIR/huggingface}"
       
       # Function to set up directories and config
       setup_directories() {
@@ -148,9 +154,234 @@ CONFIG_CONTENT
         exit 0
       }
       
+      # Function to download a file if URL is provided
+      download_file() {
+        local url="$1"
+        local output_file="${2:-$(basename "$url")}"
+        
+        # Remove ?download=true suffix if present
+        url="${url%?download=true}"
+        
+        echo "Downloading $output_file from $url..."
+        
+        # Determine if we should download to the default download directory
+        if [ "${output_file##*/}" = "${output_file}" ]; then
+          # No path specified, use download dir
+          mkdir -p "$DOWNLOAD_DIR"
+          output_file="$DOWNLOAD_DIR/$(basename "$output_file")"
+        fi
+        
+        curl -L -o "$output_file" "$url"
+        
+        echo "Download complete!"
+        echo "$output_file"
+      }
+      
+      # Function to calculate SHA256 hash
+      calculate_hash() {
+        local file="$1"
+        shasum -a 256 "$file" | cut -d ' ' -f 1
+      }
+      
+      # Function to extract model information
+      extract_model_info() {
+        local model_file="$1"
+        
+        # For TinyLLama, use hardcoded values
+        if [[ "$model_file" == *"TinyLLama"* || "$model_file" == *"tinyllama"* ]]; then
+          echo "1.1B:2048:LLaMA"
+          return
+        fi
+        
+        # For other models, try to extract info from filename but return Unknown if not possible
+        if [[ "$model_file" == *"7b"* ]]; then
+          echo "7B:4096:Unknown"
+        elif [[ "$model_file" == *"13b"* ]]; then
+          echo "13B:4096:Unknown"
+        elif [[ "$model_file" == *"70b"* ]]; then
+          echo "70B:4096:Unknown"
+        else
+          echo "Unknown:Unknown:Unknown"
+        fi
+      }
+      
+      # Function to generate a markdown documentation file
+      generate_docs() {
+        local model_name="$1"
+        local input_file="$2"
+        local output_file="$3"
+        local hash="$4"
+        local description="${5:-A language model converted to llamafile format}"
+        local model_info="$6"
+        local doc_file="${OUTPUT_DIR}/${model_name}/README.md"
+        
+        # Parse model information
+        local parameters=$(echo "$model_info" | cut -d: -f1)
+        local context_size=$(echo "$model_info" | cut -d: -f2)
+        local model_type=$(echo "$model_info" | cut -d: -f3)
+        
+        echo "Generating documentation in $doc_file..."
+        
+        mkdir -p "$(dirname "$doc_file")"
+        
+        # Create documentation
+        cat > "$doc_file" << EOF
+# ${model_name} llamafile
+
+## Model Information
+
+- **Original File**: \`$(basename "$input_file")\`
+- **LLamafile**: \`$(basename "$output_file")\`
+- **SHA256**: \`${hash}\`
+- **Size**: $(du -h "$output_file" | cut -f1)
+EOF
+
+        # Add model parameters if known
+        if [ "$parameters" != "Unknown" ]; then
+          echo "- **Parameters**: ${parameters}" >> "$doc_file"
+        fi
+        
+        # Add context size if known
+        if [ "$context_size" != "Unknown" ]; then
+          echo "- **Context Size**: ${context_size}" >> "$doc_file"
+        fi
+        
+        # Add model type if known
+        if [ "$model_type" != "Unknown" ]; then
+          echo "- **Model Type**: ${model_type}" >> "$doc_file"
+        fi
+        
+        # Continue with the rest of the documentation
+        cat >> "$doc_file" << EOF
+
+## Description
+
+${description}
+
+## Usage
+
+### Running the model
+
+To run this llamafile:
+
+\`\`\`bash
+chmod +x ${output_file##*/}  # Only needed the first time
+./${output_file##*/}         # Start the web server
+\`\`\`
+
+### Command line options
+
+You can also run the model with various command line options:
+
+\`\`\`bash
+# Start with a specific prompt
+./${output_file##*/} -p "Write a story about..."
+
+# Run in server mode with specific host/port
+./${output_file##*/} --host 0.0.0.0 --port 8080
+
+# Adjust inference parameters
+./${output_file##*/} --temp 0.7 --top-p 0.9
+\`\`\`
+
+For a complete list of options, run:
+
+\`\`\`bash
+./${output_file##*/} --help
+\`\`\`
+
+## About llamafile
+
+This file was created using [llamafile](https://github.com/Mozilla-Ocho/llamafile), which allows distributing and running LLMs with a single file.
+
+Generated on: $(date)
+EOF
+
+        echo "Documentation generated successfully!"
+      }
+      
+      # Function to build a llamafile
+      build_llamafile() {
+        local input_file="$1"
+        local model_name="$2"
+        local output_file="$3"
+        
+        echo "Creating llamafile $output_file from $input_file..."
+        
+        # Create output directory
+        mkdir -p "$(dirname "$output_file")"
+        
+        # Copy the llamafile executable
+        cp "$LLAMAFILE" "$output_file"
+        
+        # Create .args file with default arguments
+        echo "Creating arguments file..."
+        cat > ".args" << EOF
+-m
+$(basename "$input_file")
+--host
+0.0.0.0
+EOF
+        
+        # Use zipalign to embed the model and args
+        echo "Embedding model and arguments using zipalign..."
+        "$ZIPALIGN" -j0 "$output_file" "$input_file" ".args"
+        
+        # Make the llamafile executable
+        chmod +x "$output_file"
+        
+        # Clean up temporary files
+        rm -f ".args"
+        
+        echo "llamafile creation complete!"
+      }
+      
+      # Function to test the llamafile
+      test_llamafile() {
+        local llamafile_path="$1"
+        local prompt="${2:-Tell me a short story}"
+        
+        echo "Testing llamafile with prompt: '$prompt'"
+        echo "==============================================="
+        
+        # Run the llamafile with the prompt and a reasonable generation length
+        "$llamafile_path" -e -p "$prompt" -n 150 2>/dev/null
+        
+        local result=$?
+        echo "==============================================="
+        
+        if [ $result -eq 0 ]; then
+          echo "Test successful!"
+        else
+          echo "Test failed! Exit code: $result"
+        fi
+      }
+      
+      # Function to find next available version number for a model directory
+      find_next_version() {
+        local base_name="$1"
+        local dir="$2"
+        local counter=1
+        
+        if [ ! -d "${dir}/${base_name}" ]; then
+          echo "$base_name"
+          return
+        fi
+        
+        while [ -d "${dir}/${base_name}_v${counter}" ]; do
+          counter=$((counter + 1))
+        done
+        
+        echo "${base_name}_v${counter}"
+      }
+      
       # Parse command line arguments
       POSITIONAL_ARGS=()
-      MODEL_NAME=""
+      model_name=""
+      description=""
+      test_model=false
+      test_prompt="Tell me a short story"
+      no_docs=false
       
       while [[ $# -gt 0 ]]; do
         case $1 in
@@ -165,6 +396,7 @@ CONFIG_CONTENT
             echo "  -d, --description DESC     Custom description for the model"
             echo "  -t, --test                 Test the generated llamafile after creation"
             echo "  -p, --prompt PROMPT        Test prompt to use with the model"
+            echo "  --no-docs                  Skip generating documentation"
             exit 0
             ;;
           --setup)
@@ -176,8 +408,27 @@ CONFIG_CONTENT
             shift
             ;;
           -n|--name)
-            MODEL_NAME="$2"
+            model_name="$2"
             shift
+            shift
+            ;;
+          -d|--description)
+            description="$2"
+            shift
+            shift
+            ;;
+          -t|--test)
+            test_model=true
+            shift
+            ;;
+          -p|--prompt)
+            test_prompt="$2"
+            test_model=true
+            shift
+            shift
+            ;;
+          --no-docs)
+            no_docs=true
             shift
             ;;
           *)
@@ -207,31 +458,74 @@ CONFIG_CONTENT
         exit 1
       fi
       
-      # Get the model file
-      MODEL_FILE="$1"
-      if [ -z "$MODEL_NAME" ]; then
-        MODEL_NAME=$(basename "$MODEL_FILE" .gguf)
-      fi
-      
-      # Create output directory
-      mkdir -p "$OUTPUT_DIR/$MODEL_NAME"
-      if [ $? -ne 0 ]; then
-        echo "Error: Could not create directory $OUTPUT_DIR/$MODEL_NAME"
-        echo "Please run setup first:"
-        echo "  makellamafile --setup"
+      # Check if binaries exist
+      if [ ! -x "$LLAMAFILE" ] || [ ! -x "$ZIPALIGN" ]; then
+        echo "Error: Required binaries not found or not executable"
+        echo "Please ensure MakeLlamafile is properly installed"
         exit 1
       fi
       
-      LLAMAFILE="$OUTPUT_DIR/$MODEL_NAME/$MODEL_NAME.llamafile"
+      # Get the model file
+      input="$1"
+      input_file=""
       
-      # Convert the model
-      echo "Creating llamafile from $MODEL_FILE..."
-      cp #{share_path}/bin/llamafile "$LLAMAFILE"
-      #{share_path}/bin/zipalign -j0 "$LLAMAFILE" "$MODEL_FILE"
-      chmod +x "$LLAMAFILE"
+      # Check if input is a URL or local file
+      if [[ "$input" == http* ]]; then
+        echo "Downloading from URL: $input"
+        input_file="$(download_file "$input")"
+        downloaded=true
+      else
+        input_file="$input"
+        if [ ! -f "$input_file" ]; then
+          echo "Error: Input file '$input_file' not found"
+          exit 1
+        fi
+        downloaded=false
+      fi
       
-      echo "Created llamafile at: $LLAMAFILE"
-      echo "Run it with: $LLAMAFILE"
+      # Set model name if not provided
+      if [ -z "$model_name" ]; then
+        model_name="$(basename "${input_file%.gguf}")"
+      fi
+      
+      # Check if directory already exists and increment version if needed
+      model_name="$(find_next_version "$model_name" "$OUTPUT_DIR")"
+      echo "Using model name: $model_name"
+      
+      # Set output filename
+      output_file="${OUTPUT_DIR}/${model_name}/${model_name}.llamafile"
+      
+      # Calculate SHA256 hash
+      hash=$(calculate_hash "$input_file")
+      echo "SHA256 Hash: $hash"
+      
+      # Extract model information
+      model_info=$(extract_model_info "$input_file")
+      
+      # Build the llamafile
+      build_llamafile "$input_file" "$model_name" "$output_file"
+      
+      # Generate documentation unless disabled
+      if [ "$no_docs" = false ]; then
+        generate_docs "$model_name" "$input_file" "$output_file" "$hash" "$description" "$model_info"
+      fi
+      
+      # Test the llamafile if requested
+      if [ "$test_model" = true ]; then
+        test_llamafile "$output_file" "$test_prompt"
+      fi
+      
+      # Clean up downloaded file if needed
+      if [ "$downloaded" = true ]; then
+        echo "Cleaning up downloaded file..."
+        rm -f "$input_file"
+      fi
+      
+      echo "Successfully created llamafile at $output_file"
+      
+      if [ "$no_docs" = false ]; then
+        echo "Documentation available at ${OUTPUT_DIR}/${model_name}/README.md"
+      fi
     EOS
     chmod 0755, "#{share_path}/bin/create_llamafile.sh"
     
