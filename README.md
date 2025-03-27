@@ -11,13 +11,17 @@ MakeLlamafile simplifies the process of converting large language model files (G
 - The model weights
 - A built-in web server with chat interface
 - Command-line interface
+- Automatic documentation generation
 
 ## Features
 
 - Simple command-line interface for converting models
-- Automatic downloading of models from Hugging Face
-- Documentation generation for each converted model
-- Optional testing of generated llamafiles
+- Automatic downloading of models from Hugging Face URLs
+- Model versioning to prevent overwrites
+- Documentation generation with model parameters and usage instructions
+- SHA256 hash verification for model integrity
+- Optional testing of generated llamafiles with custom prompts
+- Model size and parameter detection
 
 ## Requirements
 
@@ -69,11 +73,17 @@ Convert a local GGUF file to a llamafile:
 makellamafile path/to/model.gguf
 ```
 
-Convert a model from Hugging Face:
+Convert a model from Hugging Face URL:
 
 ```bash
 makellamafile https://huggingface.co/organization/model/resolve/main/model.gguf
 ```
+
+### Version Control
+
+MakeLlamafile automatically handles duplicate model names by adding version numbers:
+- First instance: `model-name`
+- Subsequent instances: `model-name_v1`, `model-name_v2`, etc.
 
 ### Options
 
@@ -88,6 +98,30 @@ Options:
   -d, --description DESC     Custom description for the model
   -t, --test                 Test the generated llamafile after creation
   -p, --prompt PROMPT        Test prompt to use with the model
+  --no-docs                  Skip generating documentation
+```
+
+## Documentation Generation
+
+MakeLlamafile automatically generates a README.md file for each model with:
+- Model information (parameters, context size)
+- SHA256 hash for verification
+- File size and details
+- Usage instructions and examples
+- Command line options
+
+## Testing Models
+
+You can test your model immediately after conversion:
+
+```bash
+makellamafile -t path/to/model.gguf
+```
+
+Or specify a custom test prompt:
+
+```bash
+makellamafile -t -p "Write a poem about AI" path/to/model.gguf
 ```
 
 ## Using Generated Llamafiles
@@ -120,11 +154,9 @@ When installed via Homebrew, the files are organized as follows:
 /opt/homebrew/bin/zipalign          # Symlink to Mozilla zipalign binary
 
 /opt/homebrew/share/makellamafile/  # Package data directory
-  ├── bin/                      # Binary storage
-  │   ├── llamafile             # Mozilla llamafile binary
-  │   └── zipalign              # Mozilla zipalign binary
-  └── models/                   # Test model storage
-      └── TinyLLama-v0.1-5M-F16.gguf # Small test model
+  └── bin/                      # Binary storage
+      ├── llamafile             # Mozilla llamafile binary
+      └── zipalign              # Mozilla zipalign binary
 
 ~/models/                       # User's model storage (created by --setup)
   ├── huggingface/              # Downloads from Hugging Face
