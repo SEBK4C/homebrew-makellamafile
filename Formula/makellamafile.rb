@@ -6,6 +6,7 @@ class Makellamafile < Formula
   license "MIT"
   
   depends_on "curl"
+  depends_on "huggingface-cli"
   depends_on :macos => :monterey
   depends_on :arch => :arm64
   
@@ -13,7 +14,6 @@ class Makellamafile < Formula
     # Create package-specific directories in the Homebrew prefix
     share_path = "#{prefix}/share/makellamafile"
     mkdir_p "#{share_path}/bin"
-    mkdir_p "#{share_path}/models"
     
     ohai "Setting up cosmocc compiler environment"
     # Download and set up cosmocc explicitly with better error handling
@@ -235,11 +235,6 @@ CONFIG_CONTENT
     EOS
     chmod 0755, "#{share_path}/bin/create_llamafile.sh"
     
-    # Download a tiny test model
-    ohai "Downloading test model"
-    system "curl", "-L", "-o", "#{share_path}/models/TinyLLama-v0.1-5M-F16.gguf", 
-           "https://huggingface.co/ggml-org/models/resolve/main/TinyLLama-v0.1-5M-F16.gguf"
-    
     # Create symlinks in bin directory
     bin.install_symlink "#{share_path}/bin/llamafile"
     bin.install_symlink "#{share_path}/bin/zipalign"
@@ -301,11 +296,7 @@ CONFIG_CONTENT
     assert_predicate bin/"llamafile", :executable?
     assert_predicate bin/"zipalign", :executable?
     
-    # Check if test model was downloaded
-    assert_predicate "#{prefix}/share/makellamafile/models/TinyLLama-v0.1-5M-F16.gguf", :file?
-    
-    # No need to check for user directories as they might not be creatable in test environment
-    # Instead, check our package files exist
+    # Check if our package files exist
     assert_predicate "#{prefix}/share/makellamafile/bin/create_llamafile.sh", :executable?
   end
 end 
