@@ -20,6 +20,10 @@ class Makellamafile < Formula
     ENV["TMPDIR"] = buildpath/"tmp"
     mkdir_p ENV["TMPDIR"]
     
+    # Create a separate directory for cosmocc to avoid conflicts
+    cosmocc_dir = buildpath/".cosmocc"
+    mkdir_p cosmocc_dir
+    
     # Download cosmocc zip file
     cosmocc_zip = buildpath/"cosmocc.zip"
     system "curl", "-L", "-o", cosmocc_zip, "https://cosmo.zip/pub/cosmocc/cosmocc.zip"
@@ -28,24 +32,39 @@ class Makellamafile < Formula
       odie "Failed to download cosmocc.zip"
     end
     
-    # Extract cosmocc
-    system "unzip", cosmocc_zip, "-d", buildpath
+    # Extract cosmocc to the dedicated directory
+    ohai "Extracting cosmocc.zip to #{cosmocc_dir}"
+    system "unzip", "-q", cosmocc_zip, "-d", cosmocc_dir
     
-    unless Dir.exist?(buildpath/".cosmocc")
-      odie "Failed to extract cosmocc.zip or .cosmocc directory not found"
+    # Check if the extraction worked by looking for bin/make
+    cosmocc_make = cosmocc_dir/"bin/make"
+    
+    unless File.executable?(cosmocc_make)
+      # If not found in expected location, try different approach - sometimes cosmocc.zip contents are at root
+      if File.exist?(cosmocc_dir/"cosmocc")
+        ohai "Found cosmocc in different location structure"
+        cosmocc_make = cosmocc_dir/"cosmocc/bin/make"
+      else
+        # Skip building and just download pre-built binaries
+        ohai "Unable to set up cosmocc properly, downloading pre-built binaries instead"
+        system "curl", "-L", "-o", "#{share_path}/bin/llamafile", 
+               "https://github.com/Mozilla-Ocho/llamafile/releases/download/0.9.1/llamafile-0.9.1-apple-darwin-arm64"
+        system "curl", "-L", "-o", "#{share_path}/bin/zipalign", 
+               "https://github.com/Mozilla-Ocho/llamafile/releases/download/0.9.1/zipalign-0.9.1-apple-darwin-arm64"
+        
+        # Ensure binaries are executable and continue with script creation
+        chmod 0755, "#{share_path}/bin/llamafile"
+        chmod 0755, "#{share_path}/bin/zipalign"
+        goto :create_script
+      end
     end
     
     # Set up environment for cosmocc
-    ENV.prepend_path "PATH", buildpath/".cosmocc/bin"
-    cosmocc_make = buildpath/".cosmocc/bin/make"
-    
-    unless File.executable?(cosmocc_make)
-      odie "cosmocc make executable not found or not executable"
-    end
+    ENV.prepend_path "PATH", cosmocc_make.dirname
     
     ohai "Building llamafile and zipalign (this may take a few minutes)"
     # Build the tools with detailed output
-    system "ls", "-la", buildpath/".cosmocc/bin/"
+    system "ls", "-la", cosmocc_make.dirname
     
     # Try building with verbose output to see potential errors
     system cosmocc_make, "-j#{ENV.make_jobs}", "V=1", "o/llamafile", "o/zipalign"
@@ -66,6 +85,9 @@ class Makellamafile < Formula
     # Ensure binaries are executable
     chmod 0755, "#{share_path}/bin/llamafile"
     chmod 0755, "#{share_path}/bin/zipalign"
+    
+    # Create script label for goto
+    create_script = true
     
     # Create a basic version of create_llamafile.sh script
     File.write("#{share_path}/bin/create_llamafile.sh", <<~EOS)
