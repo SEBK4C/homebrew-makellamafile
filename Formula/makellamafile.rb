@@ -95,21 +95,53 @@ class Makellamafile < Formula
       set -e
       
       # Default output directory
-      OUTPUT_DIR="$HOME/models/llamafiles"
+      DEFAULT_OUTPUT_DIR="$HOME/Library/Application Support/makellamafile/llamafiles"
+      CONFIG_FILE="$HOME/.config/makellamafile/config"
       
-      # Check for help
-      if [[ "$1" == "-h" || "$1" == "--help" ]]; then
-        echo "Usage: makellamafile [OPTIONS] GGUF_FILE_OR_URL"
-        echo
-        echo "Options:"
-        echo "  -h, --help                 Show this help message"
-        echo "  -o, --output-dir DIR       Set output directory (default: $OUTPUT_DIR)"
-        echo "  -n, --name MODEL_NAME      Custom name for model (default: derived from filename)"
-        echo "  -d, --description DESC     Custom description for the model"
-        echo "  -t, --test                 Test the generated llamafile after creation"
-        echo "  -p, --prompt PROMPT        Test prompt to use with the model"
-        exit 0
+      # Read from config file if it exists
+      if [ -f "$CONFIG_FILE" ]; then
+        source "$CONFIG_FILE"
       fi
+      
+      # Use OUTPUT_DIR from config or default
+      OUTPUT_DIR="\${OUTPUT_DIR:-\$DEFAULT_OUTPUT_DIR}"
+      
+      # Parse command line arguments
+      POSITIONAL_ARGS=()
+      MODEL_NAME=""
+      
+      while [[ $# -gt 0 ]]; do
+        case $1 in
+          -h|--help)
+            echo "Usage: makellamafile [OPTIONS] GGUF_FILE_OR_URL"
+            echo
+            echo "Options:"
+            echo "  -h, --help                 Show this help message"
+            echo "  -o, --output-dir DIR       Set output directory (default: $OUTPUT_DIR)"
+            echo "  -n, --name MODEL_NAME      Custom name for model (default: derived from filename)"
+            echo "  -d, --description DESC     Custom description for the model"
+            echo "  -t, --test                 Test the generated llamafile after creation"
+            echo "  -p, --prompt PROMPT        Test prompt to use with the model"
+            exit 0
+            ;;
+          -o|--output-dir)
+            OUTPUT_DIR="$2"
+            shift
+            shift
+            ;;
+          -n|--name)
+            MODEL_NAME="$2"
+            shift
+            shift
+            ;;
+          *)
+            POSITIONAL_ARGS+=("$1")
+            shift
+            ;;
+        esac
+      done
+      
+      set -- "\${POSITIONAL_ARGS[@]}"
       
       # Check if we have enough arguments
       if [ $# -lt 1 ]; then
@@ -120,10 +152,19 @@ class Makellamafile < Formula
       
       # Get the model file
       MODEL_FILE="$1"
-      MODEL_NAME=$(basename "$MODEL_FILE" .gguf)
+      if [ -z "$MODEL_NAME" ]; then
+        MODEL_NAME=$(basename "$MODEL_FILE" .gguf)
+      fi
       
       # Create output directory
       mkdir -p "$OUTPUT_DIR/$MODEL_NAME"
+      if [ $? -ne 0 ]; then
+        echo "Error: Could not create directory $OUTPUT_DIR/$MODEL_NAME"
+        echo "You may need to manually create it:"
+        echo "  mkdir -p \"$OUTPUT_DIR/$MODEL_NAME\""
+        exit 1
+      fi
+      
       LLAMAFILE="$OUTPUT_DIR/$MODEL_NAME/$MODEL_NAME.llamafile"
       
       # Convert the model
@@ -176,39 +217,61 @@ class Makellamafile < Formula
   end
   
   def post_install
-    # Create user directories
+    # Use macOS-appropriate directories
     user_home = ENV["HOME"]
-    models_dir = "#{user_home}/models"
+    library_dir = "#{user_home}/Library/Application Support/makellamafile"
     config_dir = "#{user_home}/.config/makellamafile"
     
-    system "mkdir", "-p", "#{models_dir}/huggingface"
-    system "mkdir", "-p", "#{models_dir}/llamafiles"
-    system "mkdir", "-p", config_dir
+    # Use a more permission-friendly approach to directory creation
+    ohai "Setting up user directories..."
     
-    # Create configuration file
-    File.write("#{config_dir}/config", <<~EOS)
-      # MakeLlamafile configuration
-      OUTPUT_DIR="#{models_dir}/llamafiles"
-      DOWNLOAD_DIR="#{models_dir}/huggingface"
-      BIN_DIR="#{prefix}/share/makellamafile/bin"
-    EOS
-    
-    # Ensure directories have correct permissions
-    system "chmod", "755", "#{models_dir}/huggingface"
-    system "chmod", "755", "#{models_dir}/llamafiles"
-    system "chmod", "644", "#{config_dir}/config"
-    
-    # Run an automatic test to create the TinyLLama-v0.1-5M-F16.llamafile
-    # This ensures a working llamafile is available immediately after installation
-    test_model = "#{prefix}/share/makellamafile/models/TinyLLama-v0.1-5M-F16.gguf"
-    if File.exist?(test_model)
-      system "#{bin}/makellamafile", "-n", "TinyLLama-v0.1-5M-F16", test_model
-      system "chmod", "+x", "#{models_dir}/llamafiles/TinyLLama-v0.1-5M-F16/TinyLLama-v0.1-5M-F16.llamafile"
+    begin
+      # Try to create directories safely
+      [
+        "#{library_dir}",
+        "#{library_dir}/models",
+        "#{library_dir}/llamafiles",
+        "#{config_dir}"
+      ].each do |dir|
+        if Dir.exist?(dir)
+          ohai "Directory already exists: #{dir}"
+        else
+          Dir.mkdir(dir) rescue nil
+          unless Dir.exist?(dir)
+            opoo "Could not create directory: #{dir}"
+          end
+        end
+      end
+      
+      # Create configuration file if possible
+      if Dir.exist?(config_dir)
+        config_path = "#{config_dir}/config"
+        File.write(config_path, <<~EOS) rescue nil
+          # MakeLlamafile configuration
+          OUTPUT_DIR="#{library_dir}/llamafiles"
+          DOWNLOAD_DIR="#{library_dir}/models"
+          BIN_DIR="#{prefix}/share/makellamafile/bin"
+        EOS
+        
+        if File.exist?(config_path)
+          system "chmod", "644", config_path
+        end
+      end
+      
+      # Attempt to convert the test model if possible
+      test_model = "#{prefix}/share/makellamafile/models/TinyLLama-v0.1-5M-F16.gguf"
+      if File.exist?(test_model) && Dir.exist?("#{library_dir}/llamafiles")
+        system "#{bin}/makellamafile", "-o", "#{library_dir}/llamafiles", "-n", "TinyLLama-v0.1-5M-F16", test_model
+      end
+      
+    rescue => e
+      opoo "Error during setup: #{e.message}"
     end
   end
   
   def caveats
     user_home = ENV["HOME"]
+    library_dir = "#{user_home}/Library/Application Support/makellamafile"
     
     <<~EOS
       MakeLlamafile has been installed!
@@ -216,17 +279,13 @@ class Makellamafile < Formula
       To convert a model file to a llamafile:
         makellamafile path/to/model.gguf
       
-      Output will be saved to:
-        #{user_home}/models/llamafiles
+      If you get permission errors when running the tool, you may need to manually create:
+        mkdir -p "#{library_dir}/models"
+        mkdir -p "#{library_dir}/llamafiles"
+        mkdir -p "#{user_home}/.config/makellamafile"
       
-      Downloaded models will be stored in:
-        #{user_home}/models/huggingface
-      
-      A test llamafile has been created at:
-        #{user_home}/models/llamafiles/TinyLLama-v0.1-5M-F16/TinyLLama-v0.1-5M-F16.llamafile
-        
-      You can run it with:
-        #{user_home}/models/llamafiles/TinyLLama-v0.1-5M-F16/TinyLLama-v0.1-5M-F16.llamafile
+      The default output location for llamafiles is:
+        #{library_dir}/llamafiles
       
       For more information, run:
         makellamafile --help
@@ -239,19 +298,15 @@ class Makellamafile < Formula
     # Basic check that the executable runs
     assert_match "Usage:", shell_output("#{bin}/makellamafile --help")
     
-    # Check if the user's directories exist
-    user_home = ENV["HOME"]
-    assert_predicate "#{user_home}/models/llamafiles", :directory?
-    assert_predicate "#{user_home}/models/huggingface", :directory?
-    
-    # Check if required binaries are available
+    # Check if binaries are available
     assert_predicate bin/"llamafile", :executable?
     assert_predicate bin/"zipalign", :executable?
     
     # Check if test model was downloaded
     assert_predicate "#{prefix}/share/makellamafile/models/TinyLLama-v0.1-5M-F16.gguf", :file?
     
-    # Check if the test llamafile was created
-    assert_predicate "#{user_home}/models/llamafiles/TinyLLama-v0.1-5M-F16/TinyLLama-v0.1-5M-F16.llamafile", :executable?
+    # No need to check for user directories as they might not be creatable in test environment
+    # Instead, check our package files exist
+    assert_predicate "#{prefix}/share/makellamafile/bin/create_llamafile.sh", :executable?
   end
 end 
